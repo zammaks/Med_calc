@@ -82,6 +82,14 @@ export default function CalculatorScreen() {
     return {};
   };
 
+  const getResultColor = () => {
+    if (severity.includes("Норма")) return "#d4edda";
+    if (severity.includes("Лёгкая")) return "#fff3cd";
+    if (severity.includes("Средняя")) return "#ffe0b2";
+    return "#f8d7da";
+  };
+
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Индекс Аливерти (PaO₂ / FiO₂)</Text>
@@ -112,7 +120,7 @@ export default function CalculatorScreen() {
 
       {/* Result */}
       {result !== null && (
-        <View style={styles.resultBox}>
+        <View style={[styles.resultBox, { backgroundColor: getResultColor() }]}>
           <Text style={styles.resultText}>
             Индекс оксигенации: {result.toFixed(1)}
           </Text>
@@ -195,7 +203,6 @@ const styles = StyleSheet.create({
   resultBox: {
     marginTop: 20,
     padding: 15,
-    backgroundColor: "#eef6ff",
     borderRadius: 8,
   },
   resultText: {

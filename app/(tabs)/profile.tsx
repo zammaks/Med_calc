@@ -1,93 +1,65 @@
-import { useEffect, useState } from "react";
 import {
   View,
   Text,
   TextInput,
+  Button,
   StyleSheet,
   TouchableOpacity,
   Alert,
-  ScrollView,
 } from "react-native";
+import { useEffect, useState } from "react";
 import {
-  createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   signOut,
   deleteUser,
-  onAuthStateChanged,
-  updateEmail,
 } from "firebase/auth";
-import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
 import { auth, db } from "../../src/services/firebase";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 
 export default function ProfileScreen() {
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<any>(auth.currentUser);
+
   const [mode, setMode] = useState<"login" | "register">("login");
+  const [editing, setEditing] = useState(false);
 
   // общие
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  // регистрация / профиль
-  const [name, setName] = useState("");
-  const [surname, setSurname] = useState("");
+  // профиль
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
   const [age, setAge] = useState("");
 
-  const [errors, setErrors] = useState<any>({});
-
   useEffect(() => {
-    return onAuthStateChanged(auth, async (u) => {
-      setUser(u);
-      if (u) {
-        const snap = await getDoc(doc(db, "users", u.uid));
-        if (snap.exists()) {
-          const d = snap.data();
-          setName(d.name ?? "");
-          setSurname(d.surname ?? "");
-          setPhone(d.phone ?? "");
-          setAge(d.age?.toString() ?? "");
-          setEmail(u.email ?? "");
-        }
-      }
-    });
-  }, []);
+    if (user) loadProfile();
+  }, [user]);
 
-  /* ---------------- ВАЛИДАЦИЯ ---------------- */
-
-  const validate = () => {
-    const e: any = {};
-
-    if (!email.includes("@")) e.email = "Введите корректный email";
-    if (password.length < 6 && !user)
-      e.password = "Пароль минимум 6 символов";
-
-    if (mode === "register" || user) {
-      if (!name) e.name = "Введите имя";
-      if (!surname) e.surname = "Введите фамилию";
-      if (!/^\+?\d{10,15}$/.test(phone))
-        e.phone = "Телефон в формате +79991234567";
-      if (+age < 1 || +age > 120)
-        e.age = "Возраст должен быть от 1 до 120";
+  const loadProfile = async () => {
+    const snap = await getDoc(doc(db, "users", user.uid));
+    if (snap.exists()) {
+      const d = snap.data();
+      setFirstName(d.firstName ?? "");
+      setLastName(d.lastName ?? "");
+      setPhone(d.phone ?? "");
+      setAge(d.age?.toString() ?? "");
     }
-
-    setErrors(e);
-    return Object.keys(e).length === 0;
   };
 
-  /* ---------------- АВТОРИЗАЦИЯ ---------------- */
-
+  // ---------- ВХОД ----------
   const login = async () => {
-    if (!validate()) return;
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      Alert.alert("Успешно", "Вы вошли в аккаунт");
+      setUser(auth.currentUser);
     } catch (e: any) {
-      Alert.alert("Ошибка", e.message);
+      Alert.alert("Ошибка входа", e.message);
     }
   };
 
+  // ---------- РЕГИСТРАЦИЯ ----------
   const register = async () => {
-    if (!validate()) return;
     try {
       const cred = await createUserWithEmailAndPassword(
         auth,
@@ -96,206 +68,145 @@ export default function ProfileScreen() {
       );
 
       await setDoc(doc(db, "users", cred.user.uid), {
-        name,
-        surname,
+        firstName,
+        lastName,
         phone,
         age: Number(age),
+        email,
         createdAt: new Date(),
       });
 
-      Alert.alert("Успешно", "Аккаунт создан");
+      setUser(cred.user);
     } catch (e: any) {
-      Alert.alert("Ошибка", e.message);
+      Alert.alert("Ошибка регистрации", e.message);
     }
   };
 
-  /* ---------------- ПРОФИЛЬ ---------------- */
-
+  // ---------- СОХРАНЕНИЕ ПРОФИЛЯ ----------
   const saveProfile = async () => {
-    if (!validate()) return;
-    try {
-      await updateDoc(doc(db, "users", user.uid), {
-        name,
-        surname,
+    await setDoc(
+      doc(db, "users", user.uid),
+      {
+        firstName,
+        lastName,
         phone,
         age: Number(age),
-      });
-
-      if (email !== user.email) {
-        await updateEmail(user, email);
-      }
-
-      Alert.alert("Успешно", "Профиль обновлён");
-    } catch (e: any) {
-      Alert.alert("Ошибка", e.message);
-    }
+      },
+      { merge: true }
+    );
+    setEditing(false);
   };
 
   const logout = async () => {
     await signOut(auth);
+    setUser(null);
   };
 
   const removeAccount = async () => {
-    Alert.alert("Подтверждение", "Удалить аккаунт навсегда?", [
-      { text: "Отмена" },
+    Alert.alert("Удалить аккаунт?", "Это действие необратимо", [
+      { text: "Отмена", style: "cancel" },
       {
         text: "Удалить",
         style: "destructive",
         onPress: async () => {
-          try {
-            await deleteUser(user);
-            Alert.alert("Аккаунт удалён");
-          } catch (e: any) {
-            Alert.alert("Ошибка", "Перезайдите и попробуйте снова");
-          }
+          await deleteUser(user);
+          setUser(null);
         },
       },
     ]);
   };
 
-  /* ---------------- UI ---------------- */
-
-  const Input = (props: any) => (
-    <>
-      <TextInput style={styles.input} {...props} />
-      {errors[props.name] && (
-        <Text style={styles.error}>{errors[props.name]}</Text>
-      )}
-    </>
-  );
-
-  if (!user) {
-    return (
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>
-          {mode === "login" ? "Вход" : "Регистрация"}
-        </Text>
-
-        {mode === "register" && (
-          <>
-            <Input placeholder="Имя" value={name} onChangeText={setName} name="name" />
-            <Input
-              placeholder="Фамилия"
-              value={surname}
-              onChangeText={setSurname}
-              name="surname"
-            />
-            <Input
-              placeholder="Телефон"
-              value={phone}
-              onChangeText={setPhone}
-              name="phone"
-            />
-            <Input
-              placeholder="Возраст"
-              keyboardType="numeric"
-              value={age}
-              onChangeText={setAge}
-              name="age"
-            />
-          </>
-        )}
-
-        <Input placeholder="Email" value={email} onChangeText={setEmail} name="email" />
-        <Input
-          placeholder="Пароль"
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-          name="password"
-        />
-
-        <TouchableOpacity
-          style={styles.button}
-          onPress={mode === "login" ? login : register}
-        >
-          <Text style={styles.buttonText}>
-            {mode === "login" ? "Войти" : "Зарегистрироваться"}
-          </Text>
-        </TouchableOpacity>
-
-        <Text
-          style={styles.link}
-          onPress={() =>
-            setMode(mode === "login" ? "register" : "login")
-          }
-        >
-          {mode === "login"
-            ? "Нет аккаунта? Зарегистрируйтесь"
-            : "Уже есть аккаунт? Войдите"}
-        </Text>
-      </ScrollView>
-    );
-  }
-
-  /* -------- АВТОРИЗОВАН -------- */
-
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Профиль</Text>
+    <View style={styles.container}>
+      {user ? (
+        <>
+          <Text style={styles.title}>
+            Вы вошли как {firstName} {lastName}
+          </Text>
 
-      <Input placeholder="Имя" value={name} onChangeText={setName} name="name" />
-      <Input
-        placeholder="Фамилия"
-        value={surname}
-        onChangeText={setSurname}
-        name="surname"
-      />
-      <Input
-        placeholder="Телефон"
-        value={phone}
-        onChangeText={setPhone}
-        name="phone"
-      />
-      <Input
-        placeholder="Возраст"
-        keyboardType="numeric"
-        value={age}
-        onChangeText={setAge}
-        name="age"
-      />
-      <Input placeholder="Email" value={email} onChangeText={setEmail} name="email" />
+          {editing ? (
+            <>
+              <Text style={styles.label}>Имя</Text>
+              <TextInput style={styles.input} value={firstName} onChangeText={setFirstName} />
 
-      <TouchableOpacity style={styles.button} onPress={saveProfile}>
-        <Text style={styles.buttonText}>Сохранить</Text>
-      </TouchableOpacity>
+              <Text style={styles.label}>Фамилия</Text>
+              <TextInput style={styles.input} value={lastName} onChangeText={setLastName} />
 
-      <TouchableOpacity style={styles.out} onPress={logout}>
-        <Text>Выйти</Text>
-      </TouchableOpacity>
+              <Text style={styles.label}>Телефон</Text>
+              <TextInput style={styles.input} value={phone} onChangeText={setPhone} />
 
-      <TouchableOpacity onPress={removeAccount}>
-        <Text style={styles.delete}>Удалить аккаунт</Text>
-      </TouchableOpacity>
-    </ScrollView>
+              <Text style={styles.label}>Возраст</Text>
+              <TextInput style={styles.input} value={age} onChangeText={setAge} keyboardType="numeric" />
+
+              <Button title="Сохранить изменения" onPress={saveProfile} />
+            </>
+          ) : (
+            <>
+              <Button title="Редактировать профиль" onPress={() => setEditing(true)} />
+            </>
+          )}
+
+          <View style={{ height: 10 }} />
+          <Button title="Удалить аккаунт" color="red" onPress={removeAccount} />
+          <View style={{ height: 10 }} />
+          <Button title="Выйти" onPress={logout} />
+        </>
+      ) : (
+        <>
+          <Text style={styles.title}>
+            {mode === "login" ? "Вход" : "Регистрация"}
+          </Text>
+
+          <Text style={styles.label}>Email</Text>
+          <TextInput style={styles.input} value={email} onChangeText={setEmail} />
+
+          <Text style={styles.label}>Пароль</Text>
+          <TextInput style={styles.input} secureTextEntry value={password} onChangeText={setPassword} />
+
+          {mode === "register" && (
+            <>
+              <Text style={styles.label}>Имя</Text>
+              <TextInput style={styles.input} value={firstName} onChangeText={setFirstName} />
+
+              <Text style={styles.label}>Фамилия</Text>
+              <TextInput style={styles.input} value={lastName} onChangeText={setLastName} />
+
+              <Text style={styles.label}>Телефон</Text>
+              <TextInput style={styles.input} value={phone} onChangeText={setPhone} />
+
+              <Text style={styles.label}>Возраст</Text>
+              <TextInput style={styles.input} value={age} onChangeText={setAge} keyboardType="numeric" />
+            </>
+          )}
+
+          <Button
+            title={mode === "login" ? "Войти" : "Зарегистрироваться"}
+            onPress={mode === "login" ? login : register}
+          />
+
+          <TouchableOpacity onPress={() => setMode(mode === "login" ? "register" : "login")}>
+            <Text style={styles.link}>
+              {mode === "login"
+                ? "Нет аккаунта? Зарегистрируйтесь"
+                : "Уже есть аккаунт? Войдите"}
+            </Text>
+          </TouchableOpacity>
+        </>
+      )}
+    </View>
   );
 }
 
-/* ---------------- СТИЛИ ---------------- */
-
 const styles = StyleSheet.create({
-  container: { padding: 20,backgroundColor: "#ffffff", },
-  title: { fontSize: 22, fontWeight: "600", marginBottom: 15 },
+  container: { flex: 1, backgroundColor: "#ffffff", padding: 20 },
+  title: { fontSize: 18, fontWeight: "600", marginBottom: 15 },
+  label: { fontSize: 13, color: "#444", marginBottom: 4 },
   input: {
     borderWidth: 1,
     borderColor: "#ccc",
-    borderRadius: 6,
-    padding: 10,
-    marginBottom: 4,
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 10,
   },
-  error: { color: "red", marginBottom: 8, fontSize: 12 },
-  button: {
-    backgroundColor: "#0066cc",
-    padding: 14,
-    borderRadius: 6,
-    marginTop: 10,
-  },
-  buttonText: { color: "white", textAlign: "center", fontWeight: "600" },
-  link: { marginTop: 15, color: "#0066cc", textAlign: "center" },
-  out: { marginTop: 20, alignItems: "center" },
-  delete: {
-    color: "red",
-    marginTop: 15,
-    textAlign: "center",
-  },
+  link: { color: "#0066cc", marginTop: 10, textAlign: "center" },
 });
