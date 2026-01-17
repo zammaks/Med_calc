@@ -1,15 +1,40 @@
-import { Tabs } from 'expo-router';
-import React from 'react';
-
-import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Tabs, router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { onAuthStateChanged } from "firebase/auth";
+import { useEffect, useState } from "react";
+import { Text, TouchableOpacity } from "react-native";
+import { auth } from "../../src/services/firebase";
 
 export default function TabLayout() {
+  const [email, setEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    return onAuthStateChanged(auth, (user) => {
+      setEmail(user?.email ?? null);
+    });
+  }, []);
+
   return (
-    <Tabs>
+    <Tabs
+      screenOptions={{
+        headerStyle: { backgroundColor: "#ffffff" },
+        headerTintColor: "#000000",
+        tabBarStyle: { backgroundColor: "#ffffff" },
+        tabBarActiveTintColor: "#0066cc",
+        tabBarInactiveTintColor: "#888888",
+        headerRight: () =>
+          email ? (
+            <Text style={{ marginRight: 15, fontSize: 12, color: "#000" }}>{email}</Text>
+          ) : (
+            <TouchableOpacity
+              onPress={() => router.push("/profile")}
+              style={{ marginRight: 15 }}
+            >
+              <Text style={{ color: "#0066cc" }}>Войти</Text>
+            </TouchableOpacity>
+          ),
+      }}
+>
       <Tabs.Screen
         name="index"
         options={{
@@ -19,13 +44,21 @@ export default function TabLayout() {
           ),
         }}
       />
-
       <Tabs.Screen
         name="explore"
         options={{
           title: "История",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="time" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: "Профиль",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="person" size={size} color={color} />
           ),
         }}
       />

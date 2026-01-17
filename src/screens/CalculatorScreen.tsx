@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { auth } from "../services/auth";
 import {
   View,
   Text,
@@ -7,7 +8,7 @@ import {
   StyleSheet,
   ScrollView,
 } from "react-native";
-import { collection, addDoc } from "firebase/firestore";
+import { doc,collection, addDoc } from "firebase/firestore";
 import { db } from "../services/firebase";
 
 export default function CalculatorScreen() {
@@ -55,13 +56,20 @@ export default function CalculatorScreen() {
     setSeverity(level);
 
     try {
-      await addDoc(collection(db, "calculations"), {
-        pao2: pao2Num,
-        fio2Percent: Number(fio2),
-        ratio,
-        severity: level,
-        createdAt: new Date(),
-      });
+        const user = auth.currentUser;
+        if (!user) return;
+
+        await addDoc(
+        collection(db, "users", user.uid, "calculations"),
+        {
+            pao2: pao2Num,
+            fio2Percent: Number(fio2),
+            ratio,
+            severity: level,
+            createdAt: new Date(),
+        }
+        );
+
     } catch (e) {
       console.error("Ошибка сохранения:", e);
     }
@@ -96,7 +104,7 @@ export default function CalculatorScreen() {
         keyboardType="numeric"
         value={fio2}
         onChangeText={setFio2}
-        placeholder="21–100"
+        placeholder="Введите число в диапазоне 21–100"
       />
       {fio2Error !== "" && <Text style={styles.error}>{fio2Error}</Text>}
 

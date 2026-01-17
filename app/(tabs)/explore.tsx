@@ -2,96 +2,88 @@ import { useEffect, useState } from "react";
 import {
   View,
   Text,
-  StyleSheet,
   FlatList,
-  ActivityIndicator,
+  StyleSheet,
+  TouchableOpacity,
 } from "react-native";
-import { collection, getDocs, orderBy, query } from "firebase/firestore";
-import { db } from "../../src/services/firebase";
-
-interface Calculation {
-  id: string;
-  pao2: number;
-  fio2Percent: number;
-  ratio: number;
-  severity: string;
-  createdAt: any;
-}
+import {
+  collection,
+  onSnapshot,
+  orderBy,
+  deleteDoc,
+  doc,
+} from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth, db } from "../../src/services/firebase";
 
 export default function HistoryScreen() {
-  const [data, setData] = useState<Calculation[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<any[]>([]);
+  const [uid, setUid] = useState<string | null>(null);
 
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        const q = query(
-          collection(db, "calculations"),
-          orderBy("createdAt", "desc")
-        );
-        const snapshot = await getDocs(q);
-
-        const results = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        })) as Calculation[];
-
-        setData(results);
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadData();
+    return onAuthStateChanged(auth, (u) => {
+      setUid(u?.uid ?? null);
+    });
   }, []);
 
-  if (loading) {
-    return <ActivityIndicator style={{ marginTop: 50 }} />;
+  useEffect(() => {
+    if (!uid) return;
+
+    const q = collection(db, "users", uid, "calculations");
+    const unsub = onSnapshot(q, (snap) => {
+      const res = snap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+      }));
+      setData(res);
+    });
+
+    return unsub;
+  }, [uid]);
+
+  if (!uid) {
+    return (
+      <Text style={styles.info}>
+        Войдите, чтобы увидеть историю измерений
+      </Text>
+    );
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>История расчётов</Text>
-
-      <FlatList
-        data={data}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <View style={styles.card}>
-            <Text>PaO₂: {item.pao2}</Text>
-            <Text>FiO₂: {item.fio2Percent}%</Text>
-            <Text>Индекс: {item.ratio.toFixed(1)}</Text>
-            <Text>Состояние: {item.severity}</Text>
-          </View>
-        )}
-        ListEmptyComponent={
-          <Text style={{ textAlign: "center" }}>
-            История пока пуста
+    <FlatList
+      contentContainerStyle={{ padding: 20 }}
+      data={data}
+      keyExtractor={(i) => i.id}
+      renderItem={({ item }) => (
+        <View style={styles.card}>
+          <Text>Индекс: {item.ratio.toFixed(1)}</Text>
+          <Text>Степень: {item.severity}</Text>
+          <Text>
+            Дата: {new Date(item.createdAt.seconds * 1000).toLocaleString()}
           </Text>
-        }
-      />
-    </View>
+
+          <TouchableOpacity
+            onPress={() =>
+              deleteDoc(
+                doc(db, "users", uid, "calculations", item.id)
+              )
+            }
+          >
+            <Text style={styles.delete}>Удалить</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 20,
-    backgroundColor: "#fff",
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: "600",
-    marginBottom: 15,
-    textAlign: "center",
-  },
   card: {
-    padding: 15,
-    marginBottom: 10,
-    borderRadius: 8,
     backgroundColor: "#f2f6fa",
+    padding: 15,
+    borderRadius: 8,
+    marginBottom: 10,
   },
+  delete: { color: "red", marginTop: 5 },
+  info: { textAlign: "center", marginTop: 40 },
 });
