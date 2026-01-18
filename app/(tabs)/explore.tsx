@@ -1,55 +1,74 @@
 import { useEffect, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-} from "react-native";
-import { onAuthStateChanged } from "firebase/auth";
-import {
-  collection,
-  deleteDoc,
-  doc,
-  onSnapshot,
-  orderBy,
-  query,
-} from "firebase/firestore";
+import { View, Text, StyleSheet, ScrollView } from "react-native";
+import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import { onAuthStateChanged, User } from "firebase/auth";
 import { auth, db } from "../../src/services/firebase";
-import { LineChart } from "react-native-chart-kit";
-import { Dimensions } from "react-native";
 
-const screenWidth = Dimensions.get("window").width;
+type HistoryItem = {
+  id: string;
+  pao2: number;
+  fio2Percent: number;
+  ratio: number;
+  severity: string;
+};
 
 export default function HistoryScreen() {
-  const [user, setUser] = useState<any>(null);
-  const [history, setHistory] = useState<any[]>([]);
+  const [user, setUser] = useState<User | null>(null);
+  const [items, setItems] = useState<HistoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
+  // 🔐 слушаем авторизацию
   useEffect(() => {
     return onAuthStateChanged(auth, (u) => {
       setUser(u);
-      if (!u) {
-        setHistory([]);
-        return;
-      }
-
-      const q = query(
-        collection(db, "users", u.uid, "calculations"),
-        orderBy("createdAt", "asc")
-      );
-
-      return onSnapshot(q, (snap) => {
-        setHistory(
-          snap.docs.map((d) => ({ id: d.id, ...d.data() }))
-        );
-      });
+      setLoading(false);
     });
   }, []);
 
-  const remove = async (id: string) => {
-    if (!user) return;
-    await deleteDoc(doc(db, "users", user.uid, "calculations", id));
-  };
+  // 📜 грузим историю ТОЛЬКО когда user есть
+  useEffect(() => {
+    if (!user) {
+      setItems([]);
+      return;
+    }
+
+    const q = query(
+      collection(db, "users", user.uid, "calculations"),
+      orderBy("createdAt", "desc")
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
+      const safe: HistoryItem[] = [];
+
+      snap.forEach((doc) => {
+        const d = doc.data();
+        if (
+          typeof d.ratio === "number" &&
+          !isNaN(d.ratio)
+        ) {
+          safe.push({
+            id: doc.id,
+            pao2: d.pao2,
+            fio2Percent: d.fio2Percent,
+            ratio: Number(d.ratio.toFixed(1)),
+            severity: d.severity,
+          });
+        }
+      });
+
+      setItems(safe);
+    });
+
+    return unsub;
+  }, [user]);
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <Text>Загрузка…</Text>
+      </View>
+    );
+  }
 
   if (!user) {
     return (
@@ -59,69 +78,47 @@ export default function HistoryScreen() {
     );
   }
 
+  if (items.length === 0) {
+    return (
+      <View style={styles.center}>
+        <Text>История измерений пуста</Text>
+      </View>
+    );
+  }
+
   return (
-    <View style={{ flex: 1, backgroundColor: "#f5f5f5" }}>
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>История измерений</Text>
-
-        {history.map((h) => (
-          <View key={h.id} style={styles.card}>
-            <Text>PaO₂: {h.pao2}</Text>
-            <Text>FiO₂: {h.fio2Percent} %</Text>
-            <Text style={styles.index}>Индекс: {h.index}</Text>
-            <Text style={styles.date}>
-              {h.createdAt?.toDate().toLocaleString()}
-            </Text>
-
-            <TouchableOpacity onPress={() => remove(h.id)}>
-              <Text style={styles.delete}>Удалить</Text>
-            </TouchableOpacity>
-          </View>
-        ))}
-
-        {history.length > 1 && (
-          <>
-            <Text style={styles.graphTitle}>Динамика индекса</Text>
-            <LineChart
-              data={{
-                labels: history.map((_, i) => (i + 1).toString()),
-                datasets: [{ data: history.map((h) => h.index) }],
-              }}
-              width={screenWidth - 32}
-              height={220}
-              chartConfig={{
-                backgroundGradientFrom: "#fff",
-                backgroundGradientTo: "#fff",
-                decimalPlaces: 0,
-                color: () => "#0066cc",
-                labelColor: () => "#333",
-              }}
-              style={{ borderRadius: 8 }}
-            />
-          </>
-        )}
-      </ScrollView>
-    </View>
+    <ScrollView style={styles.container}>
+      {items.map((item) => (
+        <View key={item.id} style={styles.card}>
+          <Text style={styles.bold}>Индекс: {item.ratio}</Text>
+          <Text>PaO₂: {item.pao2}</Text>
+          <Text>FiO₂: {item.fio2Percent}%</Text>
+          <Text>Степень: {item.severity}</Text>
+        </View>
+      ))}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 16 },
+  container: {
+    backgroundColor: "#ffffff",
+    padding: 16,
+  },
   center: {
     flex: 1,
     backgroundColor: "#ffffff",
-    alignItems: "center",
     justifyContent: "center",
+    alignItems: "center",
   },
-  title: { fontSize: 22, fontWeight: "600", marginBottom: 10 },
   card: {
-    backgroundColor: "white",
-    padding: 14,
+    backgroundColor: "#f9f9f9",
+    padding: 12,
+    marginBottom: 12,
     borderRadius: 8,
-    marginBottom: 10,
   },
-  index: { fontWeight: "600", marginTop: 5 },
-  date: { fontSize: 12, color: "#666", marginTop: 5 },
-  delete: { color: "red", marginTop: 5 },
-  graphTitle: { marginVertical: 10, fontWeight: "600" },
+  bold: {
+    fontWeight: "600",
+    marginBottom: 4,
+  },
 });

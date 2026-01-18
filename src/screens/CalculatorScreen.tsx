@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import { auth } from "../services/auth";
 import {
   View,
   Text,
@@ -8,8 +7,14 @@ import {
   StyleSheet,
   ScrollView,
 } from "react-native";
-import { doc,collection, addDoc } from "firebase/firestore";
-import { db } from "../services/firebase";
+import { collection, addDoc } from "firebase/firestore";
+import { auth, db } from "../services/firebase";
+
+/** безопасное преобразование в число (Android-safe) */
+const toNumber = (v: string): number => {
+  const n = Number(v.replace(",", "."));
+  return isNaN(n) ? 0 : n;
+};
 
 export default function CalculatorScreen() {
   const [pao2, setPao2] = useState("");
@@ -21,78 +26,77 @@ export default function CalculatorScreen() {
   const [result, setResult] = useState<number | null>(null);
   const [severity, setSeverity] = useState("");
 
-  const isNumeric = (value: string) => /^[0-9]*\.?[0-9]*$/.test(value);
-
   const calculate = async () => {
     setPao2Error("");
     setFio2Error("");
+    setResult(null);
+    setSeverity("");
+
+    const pao2Num = toNumber(pao2);
+    const fio2Percent = toNumber(fio2);
 
     let hasError = false;
 
-    if (!isNumeric(pao2) || Number(pao2) <= 0) {
-      setPao2Error("Введите числовое значение PaO₂ больше 0");
+    if (pao2Num <= 0) {
+      setPao2Error("Введите PaO₂ больше 0");
       hasError = true;
     }
 
-    if (!isNumeric(fio2) || Number(fio2) < 21 || Number(fio2) > 100) {
-      setFio2Error("FiO₂ должно быть числом в диапазоне 21–100 %");
+    if (fio2Percent < 21 || fio2Percent > 100) {
+      setFio2Error("FiO₂ должно быть в диапазоне 21–100%");
       hasError = true;
     }
 
     if (hasError) return;
 
-    const pao2Num = Number(pao2);
-    const fio2Fraction = Number(fio2) / 100;
+    const fio2Fraction = fio2Percent / 100;
+    if (fio2Fraction === 0) return;
 
     const ratio = pao2Num / fio2Fraction;
+    const rounded = Number(ratio.toFixed(1));
 
     let level = "";
-    if (ratio > 300) level = "Норма";
-    else if (ratio > 200) level = "Лёгкая ОРДС";
-    else if (ratio > 100) level = "Средняя ОРДС";
+    if (rounded > 300) level = "Норма";
+    else if (rounded > 200) level = "Лёгкая ОРДС";
+    else if (rounded > 100) level = "Средняя ОРДС";
     else level = "Тяжёлая ОРДС";
 
-    setResult(ratio);
+    setResult(rounded);
     setSeverity(level);
 
     try {
-        const user = auth.currentUser;
-        if (!user) return;
+      const user = auth.currentUser;
+      if (!user) return;
 
-        await addDoc(
+      await addDoc(
         collection(db, "users", user.uid, "calculations"),
         {
-            pao2: pao2Num,
-            fio2Percent: Number(fio2),
-            ratio,
-            severity: level,
-            createdAt: new Date(),
+          pao2: pao2Num,
+          fio2Percent,
+          ratio: rounded,
+          severity: level,
+          createdAt: new Date(),
         }
-        );
-
+      );
     } catch (e) {
       console.error("Ошибка сохранения:", e);
     }
   };
 
-  const getRowStyle = (type: string) => {
-    if (severity.includes(type)) {
-      return { backgroundColor: "#d6eaff" };
-    }
-    return {};
-  };
-
   const getResultColor = () => {
-    if (severity.includes("Норма")) return "#d4edda";
-    if (severity.includes("Лёгкая")) return "#fff3cd";
-    if (severity.includes("Средняя")) return "#ffe0b2";
-    return "#f8d7da";
+    if (severity === "Норма") return "#d4edda";
+    if (severity === "Лёгкая ОРДС") return "#fff3cd";
+    if (severity === "Средняя ОРДС") return "#ffe0b2";
+    if (severity === "Тяжёлая ОРДС") return "#f8d7da";
+    return "#eef6ff";
   };
 
+  const rowHighlight = (label: string) =>
+    severity === label ? { backgroundColor: "#e6f0ff" } : undefined;
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Индекс Аливерти (PaO₂ / FiO₂)</Text>
+      <Text style={styles.title}>Индекс оксигенации (PaO₂ / FiO₂)</Text>
 
       {/* PaO2 */}
       <Text style={styles.label}>PaO₂ (мм рт. ст.)</Text>
@@ -103,7 +107,7 @@ export default function CalculatorScreen() {
         onChangeText={setPao2}
         placeholder="Например: 80"
       />
-      {pao2Error !== "" && <Text style={styles.error}>{pao2Error}</Text>}
+      {!!pao2Error && <Text style={styles.error}>{pao2Error}</Text>}
 
       {/* FiO2 */}
       <Text style={styles.label}>FiO₂ (%)</Text>
@@ -112,9 +116,9 @@ export default function CalculatorScreen() {
         keyboardType="numeric"
         value={fio2}
         onChangeText={setFio2}
-        placeholder="Введите число в диапазоне 21–100"
+        placeholder="21–100"
       />
-      {fio2Error !== "" && <Text style={styles.error}>{fio2Error}</Text>}
+      {!!fio2Error && <Text style={styles.error}>{fio2Error}</Text>}
 
       <Button title="Рассчитать" onPress={calculate} />
 
@@ -122,7 +126,7 @@ export default function CalculatorScreen() {
       {result !== null && (
         <View style={[styles.resultBox, { backgroundColor: getResultColor() }]}>
           <Text style={styles.resultText}>
-            Индекс оксигенации: {result.toFixed(1)}
+            Индекс: {result}
           </Text>
           <Text style={styles.resultText}>
             Степень: {severity}
@@ -132,9 +136,7 @@ export default function CalculatorScreen() {
 
       {/* Table */}
       <View style={styles.table}>
-        <Text style={styles.tableTitle}>
-          Интерпретация индекса оксигенации
-        </Text>
+        <Text style={styles.tableTitle}>Интерпретация</Text>
 
         <View style={styles.tableRowHeader}>
           <Text style={styles.tableCellHeader}>Степень</Text>
@@ -142,26 +144,26 @@ export default function CalculatorScreen() {
           <Text style={styles.tableCellHeader}>Летальность</Text>
         </View>
 
-        <View style={[styles.tableRow, getRowStyle("Норма")]}>
+        <View style={[styles.tableRow, rowHighlight("Норма")]}>
           <Text style={styles.tableCell}>Норма</Text>
           <Text style={styles.tableCell}>{"> 300"}</Text>
           <Text style={styles.tableCell}>—</Text>
         </View>
 
-        <View style={[styles.tableRow, getRowStyle("Лёгкая")]}>
-          <Text style={styles.tableCell}>Лёгкая ОРДС</Text>
+        <View style={[styles.tableRow, rowHighlight("Лёгкая ОРДС")]}>
+          <Text style={styles.tableCell}>Лёгкая</Text>
           <Text style={styles.tableCell}>200–300</Text>
           <Text style={styles.tableCell}>27%</Text>
         </View>
 
-        <View style={[styles.tableRow, getRowStyle("Средняя")]}>
-          <Text style={styles.tableCell}>Средняя ОРДС</Text>
+        <View style={[styles.tableRow, rowHighlight("Средняя ОРДС")]}>
+          <Text style={styles.tableCell}>Средняя</Text>
           <Text style={styles.tableCell}>100–200</Text>
           <Text style={styles.tableCell}>32%</Text>
         </View>
 
-        <View style={[styles.tableRow, getRowStyle("Тяжёлая")]}>
-          <Text style={styles.tableCell}>Тяжёлая ОРДС</Text>
+        <View style={[styles.tableRow, rowHighlight("Тяжёлая ОРДС")]}>
+          <Text style={styles.tableCell}>Тяжёлая</Text>
           <Text style={styles.tableCell}>{"< 100"}</Text>
           <Text style={styles.tableCell}>45%</Text>
         </View>
@@ -208,6 +210,7 @@ const styles = StyleSheet.create({
   resultText: {
     fontSize: 16,
     textAlign: "center",
+    fontWeight: "500",
   },
   table: {
     marginTop: 30,
