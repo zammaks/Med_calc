@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -6,11 +6,18 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Alert,
 } from "react-native";
-import { collection, addDoc } from "firebase/firestore";
+import {
+  collection,
+  addDoc,
+  query,
+  where,
+  getDocs,
+  Timestamp,
+} from "firebase/firestore";
 import { auth, db } from "../services/firebase";
 
-/** безопасное преобразование в число (Android-safe) */
 const toNumber = (v: string): number => {
   const n = Number(v.replace(",", "."));
   return isNaN(n) ? 0 : n;
@@ -19,16 +26,38 @@ const toNumber = (v: string): number => {
 export default function CalculatorScreen() {
   const [pao2, setPao2] = useState("");
   const [fio2, setFio2] = useState("");
+  const [patientName, setPatientName] = useState(""); // только для врача — текстовый ввод
 
   const [pao2Error, setPao2Error] = useState("");
   const [fio2Error, setFio2Error] = useState("");
+  const [patientError, setPatientError] = useState("");
 
   const [result, setResult] = useState<number | null>(null);
   const [severity, setSeverity] = useState("");
 
+  const [isDoctor, setIsDoctor] = useState(false);
+
+  useEffect(() => {
+    const checkRole = async () => {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      const userSnap = await getDocs(
+        query(collection(db, "users"), where("__name__", "==", user.uid))
+      );
+      if (!userSnap.empty) {
+        const data = userSnap.docs[0].data();
+        setIsDoctor(data.role === "doctor");
+      }
+    };
+
+    checkRole();
+  }, []);
+
   const calculate = async () => {
     setPao2Error("");
     setFio2Error("");
+    setPatientError("");
     setResult(null);
     setSeverity("");
 
@@ -44,6 +73,11 @@ export default function CalculatorScreen() {
 
     if (fio2Percent < 21 || fio2Percent > 100) {
       setFio2Error("FiO₂ должно быть в диапазоне 21–100%");
+      hasError = true;
+    }
+
+    if (isDoctor && !patientName.trim()) {
+      setPatientError("Укажите ФИО пациента");
       hasError = true;
     }
 
@@ -65,19 +99,88 @@ export default function CalculatorScreen() {
       const user = auth.currentUser;
       if (!user) return;
 
-      await addDoc(
-        collection(db, "users", user.uid, "calculations"),
-        {
-          pao2: pao2Num,
-          fio2Percent,
-          ratio: rounded,
-          severity: level,
-          createdAt: new Date(),
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const todayEnd = new Date();
+      todayEnd.setHours(23, 59, 59, 999);
+
+      const todayStartTs = Timestamp.fromDate(todayStart);
+      const todayEndTs = Timestamp.fromDate(todayEnd);
+
+      let targetUid = user.uid;
+      if (isDoctor) {
+        // Для врача — ищем uid пациента по ФИО (берём первого совпадение)
+        // Это упрощённый вариант — в реальном проекте лучше использовать уникальный идентификатор
+        const patientsQuery = query(
+          collection(db, "users"),
+          where("firstName", "==", patientName.split(" ")[0] || ""),
+          where("lastName", "==", patientName.split(" ")[1] || "")
+        );
+        const patientsSnap = await getDocs(patientsQuery);
+
+        if (!patientsSnap.empty) {
+          targetUid = patientsSnap.docs[0].id;
+        } else {
+          // Если пациент не найден — сохраняем всё равно под врачом, но с предупреждением
+          Alert.alert("Внимание", "Пациент с таким ФИО не найден в системе");
         }
+      }
+
+      const targetCollection = collection(db, "users", targetUid, "calculations");
+
+      // Проверка на одну запись в день
+      const q = query(
+        targetCollection,
+        where("createdAt", ">=", todayStartTs),
+        where("createdAt", "<=", todayEndTs)
       );
+
+      const existing = await getDocs(q);
+      if (!existing.empty) {
+        Alert.alert(
+          "Запись уже существует",
+          "Сегодня уже был сделан расчёт. Перезаписать?",
+          [
+            { text: "Отмена", style: "cancel" },
+            {
+              text: "Перезаписать",
+              onPress: async () => {
+                await saveCalculation(targetCollection, rounded, level, pao2Num, fio2Percent);
+              },
+            },
+          ]
+        );
+        return;
+      }
+
+      await saveCalculation(targetCollection, rounded, level, pao2Num, fio2Percent);
     } catch (e) {
       console.error("Ошибка сохранения:", e);
+      Alert.alert("Ошибка", "Не удалось сохранить расчёт");
     }
+  };
+
+  const saveCalculation = async (
+    coll: any,
+    ratio: number,
+    sev: string,
+    pao2Val: number,
+    fio2Val: number
+  ) => {
+    const data: any = {
+      pao2: pao2Val,
+      fio2Percent: fio2Val,
+      ratio,
+      severity: sev,
+      createdAt: new Date(),
+    };
+
+    if (isDoctor) {
+      data.doctorId = auth.currentUser?.uid;
+      data.patientName = patientName.trim(); // сохраняем на всякий случай
+    }
+
+    await addDoc(coll, data);
   };
 
   const getResultColor = () => {
@@ -98,7 +201,19 @@ export default function CalculatorScreen() {
         Расчёт PaO₂ / FiO₂ для оценки степени дыхательной недостаточности
       </Text>
 
-      {/* PaO2 */}
+      {isDoctor && (
+        <>
+          <Text style={styles.label}>ФИО пациента</Text>
+          <TextInput
+            style={styles.input}
+            value={patientName}
+            onChangeText={setPatientName}
+            placeholder="Иванов Иван Иванович"
+          />
+          {!!patientError && <Text style={styles.error}>{patientError}</Text>}
+        </>
+      )}
+
       <Text style={styles.label}>PaO₂ (мм рт. ст.)</Text>
       <TextInput
         style={styles.input}
@@ -109,7 +224,6 @@ export default function CalculatorScreen() {
       />
       {!!pao2Error && <Text style={styles.error}>{pao2Error}</Text>}
 
-      {/* FiO2 */}
       <Text style={styles.label}>FiO₂ (%)</Text>
       <TextInput
         style={styles.input}
@@ -120,12 +234,10 @@ export default function CalculatorScreen() {
       />
       {!!fio2Error && <Text style={styles.error}>{fio2Error}</Text>}
 
-      {/* КНОПКА */}
       <TouchableOpacity style={styles.calculateButton} onPress={calculate}>
         <Text style={styles.calculateText}>Рассчитать</Text>
       </TouchableOpacity>
 
-      {/* РЕЗУЛЬТАТ */}
       {result !== null && (
         <View style={[styles.resultBox, { backgroundColor: getResultColor() }]}>
           <Text style={styles.resultText}>Индекс: {result}</Text>
@@ -133,7 +245,6 @@ export default function CalculatorScreen() {
         </View>
       )}
 
-      {/* ТАБЛИЦА */}
       <View style={styles.table}>
         <Text style={styles.tableTitle}>Интерпретация</Text>
 
@@ -186,12 +297,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#666",
     textAlign: "center",
-    marginBottom: 20,
+    marginBottom: 24,
   },
   label: {
     fontSize: 14,
-    marginBottom: 4,
+    marginBottom: 6,
     color: "#444",
+    fontWeight: "500",
   },
   input: {
     borderWidth: 1,
@@ -199,7 +311,8 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 10,
     backgroundColor: "#f9f9f9",
-    marginBottom: 10,
+    marginBottom: 12,
+    fontSize: 16,
   },
   error: {
     color: "red",
@@ -210,8 +323,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#007bff",
     paddingVertical: 16,
     borderRadius: 30,
-    marginTop: 10,
-    marginBottom: 10,
+    marginTop: 16,
+    marginBottom: 24,
   },
   calculateText: {
     color: "#ffffff",
@@ -220,48 +333,52 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   resultBox: {
-    marginTop: 20,
-    padding: 15,
-    borderRadius: 10,
+    marginTop: 16,
+    padding: 20,
+    borderRadius: 12,
+    alignItems: "center",
   },
   resultText: {
-    fontSize: 16,
-    textAlign: "center",
-    fontWeight: "500",
+    fontSize: 18,
+    fontWeight: "600",
+    marginVertical: 4,
   },
   table: {
-    marginTop: 30,
+    marginTop: 24,
     borderWidth: 1,
-    borderColor: "#ccc",
+    borderColor: "#ddd",
     borderRadius: 10,
     overflow: "hidden",
   },
   tableTitle: {
-    backgroundColor: "#e3ecf5",
-    padding: 10,
+    backgroundColor: "#e8f0fe",
+    padding: 12,
     fontWeight: "600",
     textAlign: "center",
+    fontSize: 16,
   },
   tableRowHeader: {
     flexDirection: "row",
-    backgroundColor: "#f0f0f0",
+    backgroundColor: "#f5f5f5",
   },
   tableRow: {
     flexDirection: "row",
   },
   tableCellHeader: {
     flex: 1,
-    padding: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
     fontWeight: "600",
     textAlign: "center",
     borderRightWidth: 1,
-    borderColor: "#ccc",
+    borderColor: "#ddd",
   },
   tableCell: {
     flex: 1,
-    padding: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
     textAlign: "center",
     borderRightWidth: 1,
-    borderColor: "#ccc",
+    borderColor: "#ddd",
   },
 });

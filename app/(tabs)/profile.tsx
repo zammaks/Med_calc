@@ -29,6 +29,7 @@ export default function ProfileScreen() {
   const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
   const [age, setAge] = useState("");
+  const [role, setRole] = useState<"patient" | "doctor">("patient");
 
   useEffect(() => {
     if (user) loadProfile();
@@ -42,6 +43,7 @@ export default function ProfileScreen() {
       setLastName(d.lastName ?? "");
       setPhone(d.phone ?? "");
       setAge(d.age?.toString() ?? "");
+      setRole(d.role ?? "patient");
     }
   };
 
@@ -63,6 +65,7 @@ export default function ProfileScreen() {
         phone,
         age: Number(age),
         email,
+        role,
         createdAt: new Date(),
       });
       setUser(cred.user);
@@ -74,7 +77,7 @@ export default function ProfileScreen() {
   const saveProfile = async () => {
     await setDoc(
       doc(db, "users", user.uid),
-      { firstName, lastName, phone, age: Number(age) },
+      { firstName, lastName, phone, age: Number(age), role },
       { merge: true }
     );
     setEditing(false);
@@ -109,6 +112,9 @@ export default function ProfileScreen() {
               {firstName} {lastName}
             </Text>
             <Text style={styles.subtitle}>{user.email}</Text>
+            <Text style={styles.subtitle}>
+              Роль: {role === "doctor" ? "Врач" : "Пациент"}
+            </Text>
 
             {editing ? (
               <>
@@ -123,6 +129,42 @@ export default function ProfileScreen() {
 
                 <Text style={styles.label}>Возраст</Text>
                 <TextInput style={styles.input} value={age} onChangeText={setAge} keyboardType="numeric" />
+
+                <Text style={styles.label}>Роль</Text>
+                <View style={styles.roleContainer}>
+                  <TouchableOpacity
+                    style={[
+                      styles.roleBtn,
+                      role === "patient" && styles.selectedBtn,
+                    ]}
+                    onPress={() => setRole("patient")}
+                  >
+                    <Text
+                      style={[
+                        styles.roleText,
+                        role === "patient" && styles.selectedText,
+                      ]}
+                    >
+                      Пациент
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.roleBtn,
+                      role === "doctor" && styles.selectedBtn,
+                    ]}
+                    onPress={() => setRole("doctor")}
+                  >
+                    <Text
+                      style={[
+                        styles.roleText,
+                        role === "doctor" && styles.selectedText,
+                      ]}
+                    >
+                      Врач
+                    </Text>
+                  </TouchableOpacity>
+                </View>
 
                 <TouchableOpacity style={styles.primaryBtn} onPress={saveProfile}>
                   <Text style={styles.btnText}>Сохранить</Text>
@@ -167,6 +209,42 @@ export default function ProfileScreen() {
 
                 <Text style={styles.label}>Возраст</Text>
                 <TextInput style={styles.input} value={age} onChangeText={setAge} keyboardType="numeric" />
+
+                <Text style={styles.label}>Роль</Text>
+                <View style={styles.roleContainer}>
+                  <TouchableOpacity
+                    style={[
+                      styles.roleBtn,
+                      role === "patient" && styles.selectedBtn,
+                    ]}
+                    onPress={() => setRole("patient")}
+                  >
+                    <Text
+                      style={[
+                        styles.roleText,
+                        role === "patient" && styles.selectedText,
+                      ]}
+                    >
+                      Пациент
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.roleBtn,
+                      role === "doctor" && styles.selectedBtn,
+                    ]}
+                    onPress={() => setRole("doctor")}
+                  >
+                    <Text
+                      style={[
+                        styles.roleText,
+                        role === "doctor" && styles.selectedText,
+                      ]}
+                    >
+                      Врач
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </>
             )}
 
@@ -327,5 +405,34 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 12,
     color: "#777",
+  },
+
+  roleContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+
+  roleBtn: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#0066cc",
+    alignItems: "center",
+    marginHorizontal: 5,
+  },
+
+  selectedBtn: {
+    backgroundColor: "#0066cc",
+  },
+
+  roleText: {
+    color: "#0066cc",
+    fontWeight: "600",
+  },
+
+  selectedText: {
+    color: "#ffffff",
   },
 });
