@@ -3,9 +3,9 @@ import {
   View,
   Text,
   TextInput,
-  Button,
   StyleSheet,
   ScrollView,
+  TouchableOpacity,
 } from "react-native";
 import { collection, addDoc } from "firebase/firestore";
 import { auth, db } from "../services/firebase";
@@ -49,10 +49,7 @@ export default function CalculatorScreen() {
 
     if (hasError) return;
 
-    const fio2Fraction = fio2Percent / 100;
-    if (fio2Fraction === 0) return;
-
-    const ratio = pao2Num / fio2Fraction;
+    const ratio = pao2Num / (fio2Percent / 100);
     const rounded = Number(ratio.toFixed(1));
 
     let level = "";
@@ -96,7 +93,10 @@ export default function CalculatorScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Индекс оксигенации (PaO₂ / FiO₂)</Text>
+      <Text style={styles.title}>Индекс оксигенации</Text>
+      <Text style={styles.subtitle}>
+        Расчёт PaO₂ / FiO₂ для оценки степени дыхательной недостаточности
+      </Text>
 
       {/* PaO2 */}
       <Text style={styles.label}>PaO₂ (мм рт. ст.)</Text>
@@ -120,21 +120,20 @@ export default function CalculatorScreen() {
       />
       {!!fio2Error && <Text style={styles.error}>{fio2Error}</Text>}
 
-      <Button title="Рассчитать" onPress={calculate} />
+      {/* КНОПКА */}
+      <TouchableOpacity style={styles.calculateButton} onPress={calculate}>
+        <Text style={styles.calculateText}>Рассчитать</Text>
+      </TouchableOpacity>
 
-      {/* Result */}
+      {/* РЕЗУЛЬТАТ */}
       {result !== null && (
         <View style={[styles.resultBox, { backgroundColor: getResultColor() }]}>
-          <Text style={styles.resultText}>
-            Индекс: {result}
-          </Text>
-          <Text style={styles.resultText}>
-            Степень: {severity}
-          </Text>
+          <Text style={styles.resultText}>Индекс: {result}</Text>
+          <Text style={styles.resultText}>Степень: {severity}</Text>
         </View>
       )}
 
-      {/* Table */}
+      {/* ТАБЛИЦА */}
       <View style={styles.table}>
         <Text style={styles.tableTitle}>Интерпретация</Text>
 
@@ -180,9 +179,14 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 22,
-    fontWeight: "600",
-    marginBottom: 20,
+    fontWeight: "700",
     textAlign: "center",
+  },
+  subtitle: {
+    fontSize: 13,
+    color: "#666",
+    textAlign: "center",
+    marginBottom: 20,
   },
   label: {
     fontSize: 14,
@@ -193,19 +197,32 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#ccc",
     padding: 12,
-    marginBottom: 4,
-    borderRadius: 8,
+    borderRadius: 10,
     backgroundColor: "#f9f9f9",
+    marginBottom: 10,
   },
   error: {
     color: "red",
     fontSize: 12,
+    marginBottom: 8,
+  },
+  calculateButton: {
+    backgroundColor: "#007bff",
+    paddingVertical: 16,
+    borderRadius: 30,
+    marginTop: 10,
     marginBottom: 10,
+  },
+  calculateText: {
+    color: "#ffffff",
+    fontSize: 17,
+    fontWeight: "600",
+    textAlign: "center",
   },
   resultBox: {
     marginTop: 20,
     padding: 15,
-    borderRadius: 8,
+    borderRadius: 10,
   },
   resultText: {
     fontSize: 16,
@@ -216,7 +233,7 @@ const styles = StyleSheet.create({
     marginTop: 30,
     borderWidth: 1,
     borderColor: "#ccc",
-    borderRadius: 8,
+    borderRadius: 10,
     overflow: "hidden",
   },
   tableTitle: {
