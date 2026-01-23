@@ -14,7 +14,6 @@ import {
   query,
   where,
   getDocs,
-  Timestamp,
   serverTimestamp,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
@@ -37,10 +36,12 @@ export default function CalculatorScreen() {
   const [result, setResult] = useState<number | null>(null);
   const [severity, setSeverity] = useState("");
 
-  const [isDoctor, setIsDoctor] = useState<boolean | null>(null); // null = загрузка
+  const [isDoctor, setIsDoctor] = useState<boolean | null>(null);
   const [currentUserUid, setCurrentUserUid] = useState<string | null>(null);
 
-  // Надёжное определение роли врача
+  // Состояние для сворачивания/разворачивания справки
+  const [infoExpanded, setInfoExpanded] = useState(false);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!user) {
@@ -122,7 +123,6 @@ export default function CalculatorScreen() {
 
       let targetUid = currentUserUid;
 
-      // Для врача — пытаемся найти пациента по ФИО
       if (isDoctor) {
         const nameParts = patientName.trim().split(" ");
         const firstName = nameParts[0] || "";
@@ -139,30 +139,25 @@ export default function CalculatorScreen() {
         if (!patientsSnap.empty) {
           targetUid = patientsSnap.docs[0].id;
         } else {
-          Alert.alert("Внимание", "Пациент с таким ФИО не найден. Сохраняем под вашим аккаунтом.");
+          Alert.alert(
+            "Внимание",
+            "Пациент с таким ФИО не найден. Сохраняем под вашим аккаунтом."
+          );
         }
       }
 
       const targetCollection = collection(db, "users", targetUid, "calculations");
 
-      // Проверка на одну запись сегодня (закомментировано в оригинале)
-      // ... (оставляем как было)
-
       await saveCalculation(targetCollection, rounded, level, pao2Num, fio2Percent);
 
-      // ────────────────────────────────────────────────
-      // Очистка полей после успешного сохранения
       setPao2("");
       setFio2("");
       if (isDoctor) {
         setPatientName("");
       }
-      // ────────────────────────────────────────────────
-
     } catch (e: any) {
       console.error("Ошибка сохранения:", e);
       Alert.alert("Ошибка", `Не удалось сохранить расчёт\n${e.message || ""}`);
-      // поля НЕ очищаем при ошибке
     }
   };
 
@@ -178,7 +173,7 @@ export default function CalculatorScreen() {
       fio2Percent: fio2Val,
       ratio,
       severity: sev,
-      createdAt: serverTimestamp(), // лучше использовать серверное время
+      createdAt: serverTimestamp(),
     };
 
     if (isDoctor) {
@@ -212,9 +207,39 @@ export default function CalculatorScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Индекс оксигенации</Text>
-      <Text style={styles.subtitle}>
-        Расчёт PaO₂ / FiO₂ для оценки степени дыхательной недостаточности
+
+      <Text style={styles.subtitleEnlarged}>
+        Расчёт PaO₂ / FiO₂ — оценка степени дыхательной недостаточности
       </Text>
+
+      {/* Сворачиваемый блок справки */}
+      <TouchableOpacity
+        style={styles.infoHeader}
+        onPress={() => setInfoExpanded(!infoExpanded)}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.infoTitle}>Что означают PaO₂ и FiO₂?</Text>
+        <Text style={styles.arrow}>{infoExpanded ? "▲" : "▼"}</Text>
+      </TouchableOpacity>
+
+      {infoExpanded && (
+        <View style={styles.infoContent}>
+          <Text style={styles.infoText}>
+            <Text style={{ fontWeight: "bold" }}>PaO₂</Text> — парциальное напряжение кислорода в артериальной крови (мм рт. ст.).  
+            Определяется только по анализу газов артериальной крови (АГАК / arterial blood gas — ABG).
+          </Text>
+
+          <Text style={styles.infoText}>
+            <Text style={{ fontWeight: "bold" }}>FiO₂</Text> — фракция кислорода во вдыхаемой смеси (в % или 0.21–1.0).  
+            Указывается в настройках аппарата ИВЛ, кислородной маски, назальных канюль или HFNC.
+          </Text>
+
+          <Text style={[styles.infoText, { marginTop: 12, fontStyle: "italic" }]}>
+            Для расчёта индекса нужен свежий анализ газов артериальной крови (PaO₂) + текущая FiO₂ на момент забора крови.  
+            Пульсоксиметрия (SpO₂) для точной классификации ОРДС по Berlin-критериям не используется.
+          </Text>
+        </View>
+      )}
 
       {isDoctor && (
         <>
@@ -261,7 +286,7 @@ export default function CalculatorScreen() {
       )}
 
       <View style={styles.table}>
-        <Text style={styles.tableTitle}>Интерпретация</Text>
+        <Text style={styles.tableTitle}>Интерпретация (Berlin-критерии ОРДС)</Text>
 
         <View style={styles.tableRowHeader}>
           <Text style={styles.tableCellHeader}>Степень</Text>
@@ -297,7 +322,6 @@ export default function CalculatorScreen() {
   );
 }
 
-// стили остаются те же
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
@@ -309,11 +333,49 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     textAlign: "center",
   },
-  subtitle: {
-    fontSize: 13,
-    color: "#666",
+  subtitleEnlarged: {
+    fontSize: 16,
+    lineHeight: 22,
+    color: "#333",
     textAlign: "center",
+    fontWeight: "600",
+    marginBottom: 20,
+  },
+  // ── Новый стиль для заголовка справки ──
+  infoHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#f0f7ff",
+    padding: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#d0e4ff",
+    marginBottom: 8,
+  },
+  infoTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#1e40af",
+  },
+  arrow: {
+    fontSize: 18,
+    color: "#1e40af",
+    fontWeight: "bold",
+  },
+  infoContent: {
+    backgroundColor: "#f8fbff",
+    padding: 16,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#d0e4ff",
     marginBottom: 24,
+  },
+  infoText: {
+    fontSize: 14,
+    color: "#334155",
+    lineHeight: 20,
+    marginBottom: 10,
   },
   label: {
     fontSize: 14,
